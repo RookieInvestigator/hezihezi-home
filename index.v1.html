@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>阳里禾子与LLM的夏天</title>
+<meta name="description" content="阳里禾子与LLM的夏天：项目一览。">
+<style>
+  :root { --fg: rgba(255,255,255,.92); --dim: rgba(255,255,255,.45); --line: rgba(255,255,255,.12); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { background: #000; color: var(--fg); font-family: "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif; min-height: 100vh; }
+  #bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+  #bg canvas { display: block; width: 100%; height: 100%; }
+  header { position: relative; z-index: 1; padding: 1.1rem 1.4rem; font-size: .78rem; letter-spacing: .3em; color: var(--dim); }
+  header b { color: #ff8c2e; font-weight: 700; }
+  main { position: relative; z-index: 1; max-width: 880px; margin: 0 auto; padding: 3rem 1.4rem 4rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+  .grid a {
+    display: block; color: inherit; text-decoration: none;
+    background: rgba(10,18,28,.55); backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 14px; padding: 1.3rem 1.4rem;
+    transition: transform .15s, border-color .15s, background .15s;
+  }
+  .grid a:hover { transform: translateY(-3px); border-color: rgba(255,138,46,.5); background: rgba(10,18,28,.75); }
+  .grid .k { font-size: .8rem; color: #ff8c2e; letter-spacing: .2em; }
+  .grid h2 { font-size: 1.05rem; margin: .6rem 0 .3rem; letter-spacing: .06em; }
+  .grid p { font-size: .8rem; color: var(--dim); line-height: 1.7; }
+  .grid .url { display: block; margin-top: .7rem; font-size: .72rem; color: #ff8c2e; letter-spacing: .04em; }
+  footer { position: relative; z-index: 1; text-align: center; padding: 0 1rem 2.5rem; color: var(--dim); font-size: .72rem; letter-spacing: .25em; }
+</style>
+</head>
+<body>
+<div id="bg" aria-hidden="true"></div>
+<header>阳里禾子与LLM的夏天</header>
+<main>
+  <div class="grid">
+    <a href="https://iceberg.hezihezi.com/">
+      <div class="k">01</div>
+      <h2>中文兔子洞冰山图</h2>
+      <p>中文互联网怪谈与都市传说的共创档案，1400+ 词条。</p>
+      <span class="url">iceberg.hezihezi.com</span>
+    </a>
+    <a href="https://blog.hezihezi.com/">
+      <div class="k">02</div>
+      <h2>博客</h2>
+      <p>随笔与记录。</p>
+      <span class="url">blog.hezihezi.com</span>
+    </a>
+    <a href="https://github.com/RookieInvestigator">
+      <div class="k">03</div>
+      <h2>GitHub</h2>
+      <p>开源项目与代码。</p>
+      <span class="url">github.com/RookieInvestigator</span>
+    </a>
+    <a href="https://space.bilibili.com/23370760">
+      <div class="k">04</div>
+      <h2>B站</h2>
+      <p>视频投稿。</p>
+      <span class="url">space.bilibili.com/23370760</span>
+    </a>
+  </div>
+</main>
+<footer>© 2026 阳里禾子</footer>
+<script>
+/* 流体背景：冰山图 LiquidGradient 的静态移植（同 fragment shader + 深海色板）。
+ * 精简点：固定参数、半分辨率、30fps 封顶、reduced-motion 冻结、WebGL2 缺席回退纯黑。 */
+(function () {
+  var box = document.getElementById('bg');
+  var canvas = document.createElement('canvas');
+  canvas.style.cssText = 'display:block;width:100%;height:100%;';
+  box.appendChild(canvas);
+  var gl;
+  try {
+    gl = canvas.getContext('webgl2', { alpha: false, antialias: false, premultipliedAlpha: false });
+  } catch (e) { gl = null; }
+  if (!gl) return; // 回退：纯黑底
+
+  var VERT = '#version 300 es\nin vec2 a_position;\nout vec2 v_uv;\nvoid main(){v_uv=a_position*0.5+0.5;gl_Position=vec4(a_position,0.0,1.0);}';
+
+  var HEADER = [
+    'in vec2 v_uv;', 'out vec4 fragColor;',
+    'uniform vec2 u_resolution;', 'uniform float u_time;', 'uniform float u_pixelRatio;',
+    'uniform vec4 u_colors[8];', 'uniform int u_colors_length;',
+    'uniform float u_contrast;', 'uniform float u_darkShift;',
+    'uniform float u_dither;', 'uniform float u_ditherMode;',
+    'uniform float u_exposure;', 'uniform float u_jellify;',
+    'uniform float u_saturation;', 'uniform float u_scale;', 'uniform float u_seed;',
+    'uniform float u_speed;', 'uniform float u_turbAmp;', 'uniform float u_turbFreq;',
+    'uniform float u_turbIter;', 'uniform float u_waveFreq;', 'uniform float u_distBias;',
+    'uniform float u_loop;'
+  ].join('\n');
+
+  // —— 与 iceberg-vue/src/lib/liquidGradient.ts 的 fragmentShader 主体一致 ——
+  var BODY = [
+    'const float GOLDEN_ANGLE = 2.3999632;',
+    'const float TAU = 6.28318530;',
+    'uvec3 hash3(uvec3 v){v=v*1664525u+1013904223u;v.x+=v.y*v.z;v.y+=v.z*v.x;v.z+=v.x*v.y;v^=v>>16u;v.x+=v.y*v.z;v.y+=v.z*v.x;v.z+=v.x*v.y;return v;}',
+    'vec3 seedRandom(float s){uvec3 v=uvec3(floatBitsToUint(s),floatBitsToUint(s*1.5+7.31),floatBitsToUint(s*2.7+13.37));v=hash3(v);return vec3(v)/float(0xFFFFFFFFu);}',
+    'vec3 toLinear(vec3 c){return pow(c,vec3(2.2));}',
+    'vec3 toSrgb(vec3 c){return pow(clamp(c,0.0,1.0),vec3(0.4545));}',
+    'vec3 linearToOklab(vec3 c){float l=0.4122214708*c.r+0.5363325363*c.g+0.0514459929*c.b;float m=0.2119034982*c.r+0.6806995451*c.g+0.1073969566*c.b;float s=0.0883024619*c.r+0.2817188376*c.g+0.6299787005*c.b;l=pow(max(l,0.0),1.0/3.0);m=pow(max(m,0.0),1.0/3.0);s=pow(max(s,0.0),1.0/3.0);return vec3(0.2104542553*l+0.7936177850*m-0.0040720468*s,1.9779984951*l-2.4285922050*m+0.4505937099*s,0.0259040371*l+0.7827717662*m-0.8086757660*s);}',
+    'vec3 oklabToLinear(vec3 c){float l=c.x+0.3963377774*c.y+0.2158037577*c.z;float m=c.x-0.1055613458*c.y-0.0638541728*c.z;float s=c.x-0.0894841775*c.y-1.2914855480*c.z;l=l*l*l;m=m*m;s=s*s;return vec3(4.0767416621*l-3.3077115850*m+0.2309699292*s,-1.2684380046*l+2.6097574011*m-0.3413193965*s,-0.0041960863*l-0.7034186147*m+1.7076147010*s);}',
+    'vec3 oklabToLch(vec3 a){return vec3(a.x,length(a.yz),atan(a.z,a.y));}',
+    'vec3 lchToOklab(vec3 a){return vec3(a.x,a.y*cos(a.z),a.y*sin(a.z));}',
+    'vec3 mixLch(vec3 a,vec3 b,float t){vec3 x=oklabToLch(a);vec3 y=oklabToLch(b);if(x.y<0.05)x.z=y.z;if(y.y<0.05)y.z=x.z;float d=y.z-x.z;if(d>3.14159265)d-=6.28318530;if(d<-3.14159265)d+=6.28318530;return lchToOklab(vec3(mix(x.x,y.x,t),mix(x.y,y.y,t),x.z+d*t));}',
+    'vec3 getColor(int i){if(u_colors_length<1)return vec3(0.0);return u_colors[clamp(i,0,u_colors_length-1)].rgb;}',
+    'vec3 paletteN(float t,int n){if(n<1)return vec3(0.0);if(n<2)return toLinear(getColor(0));float s=1.0/float(n-1);t=clamp(t,0.0,1.0);int i=min(int(floor(t/s)),n-2);float l=clamp((t-float(i)*s)/s,0.0,1.0);return oklabToLinear(mixLch(linearToOklab(getColor(i)),linearToOklab(getColor(i+1)),l));}',
+    'float IGN(vec2 uv){return fract(52.9829189*fract(dot(uv,vec2(0.06711056,0.00583715))));}',
+    'vec3 softGamutMap(vec3 c){float a=max(c.r,max(c.g,c.b));float b=min(c.r,min(c.g,c.b));if(b>=0.0&&a<=1.0)return c;vec3 l=linearToOklab(max(c,0.0));float L=clamp(l.x,0.0,1.0);float C=length(l.yz);float h=atan(l.z,l.y);float m=0.4*(1.0-pow(abs(2.0*L-1.0),2.0));if(C>m*0.7){float k=m*0.7;C=k+(m-k)*tanh((C-k)/(m-k+0.001));}return clamp(oklabToLinear(vec3(L,C*cos(h),C*sin(h))),0.0,1.0);}',
+    'vec3 applyCS(vec3 c,float co,float sa){vec3 l=linearToOklab(c);float C=length(l.yz);float h=atan(l.z,l.y);l.x=clamp((l.x-0.5)*co+0.5,0.0,1.0);C*=sa;l.y=C*cos(h);l.z=C*sin(h);return oklabToLinear(l);}',
+    'void main(){',
+    'vec2 fc=v_uv*u_resolution;vec2 r=u_resolution;vec2 p=(fc*2.0-r)/r.y;',
+    'int n=u_colors_length;',
+    'if(n<1){fragColor=vec4(0.0,0.0,0.0,1.0);return;}',
+    'float t=u_time*0.3;',
+    'vec3 s1=seedRandom(u_seed);vec3 s2=seedRandom(u_seed+100.0);',
+    'float an=u_seed*GOLDEN_ANGLE;vec2 sp=(s2.xy-0.5)*TAU;',
+    'float cs=cos(an);float sn=sin(an);p=mat2(cs,-sn,sn,cs)*p;',
+    'float d=IGN(floor(fc/u_pixelRatio));',
+    'float tv=0.0;float tw=0.0;float fr=1.0/max(u_turbFreq,0.01);',
+    'for(float i=0.0;i<4.0;i++){',
+    'float e=i/4.0;vec2 q=p*u_scale;float sq=e*e;',
+    'if(u_jellify>0.5){q.yx*=mix(1.0,0.5,1.0-exp(-sq));}',
+    'float a=sp.x;float dd=sp.y;',
+    'for(int j=2;j<13;j++){if(j>=int(u_turbIter))break;float f=float(j);',
+    'q+=u_turbAmp*sin(q.yx/fr*f+t*u_speed+vec2(a,dd)+s1.xy*f)/f;',
+    'a+=cos(f+dd*1.2+q.x*2.0-t*u_speed+s2.z);',
+    'dd+=sin(f*q.y+a+s1.z+t*u_speed+s2.y);}',
+    'float v=0.5+0.5*sin(length(q.yx+vec2(a,dd)*0.2)*u_waveFreq+i*i+s1.x);',
+    'float w=smoothstep(0.0,0.5,e)*smoothstep(1.0,0.5,e);tv+=v*w;tw+=w;}',
+    'float val=tv/tw;val=clamp((val-0.3)/0.4,0.0,1.0);',
+    'val=clamp(val-u_darkShift,0.0,1.0);',
+    'val=pow(val,exp(-u_distBias));',
+    'val=clamp(val+(d-0.5)*u_dither,0.0,1.0);',
+    'vec3 col=paletteN(val,n);col*=u_exposure;',
+    'col=applyCS(col,u_contrast,u_saturation);col=softGamutMap(col);col=toSrgb(col);',
+    'fragColor=vec4(col,1.0);}'
+  ].join('\n');
+
+  function sh(type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+
+  function hexRgb(h) {
+    h = h.replace('#', '');
+    if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join('');
+    var v = parseInt(h.slice(0, 6), 16);
+    function lin(c) { return Math.pow(c / 255, 2.2); }
+    return [lin((v >> 16) & 255), lin((v >> 8) & 255), lin(v & 255)];
+  }
+
+  try {
+    var prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, '#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp usampler2D;\n' + HEADER + '\n' + BODY));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('link');
+    gl.useProgram(prog);
+
+    var buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    var pos = gl.getAttribLocation(prog, 'a_position');
+    gl.enableVertexAttribArray(pos);
+    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+    function uf1(n, v) { var l = gl.getUniformLocation(prog, n); if (l) gl.uniform1f(l, v); }
+    function setColors(arr) {
+      var l0 = gl.getUniformLocation(prog, 'u_colors_length');
+      if (l0) gl.uniform1i(l0, arr.length);
+      arr.forEach(function (c, i) {
+        var l = gl.getUniformLocation(prog, 'u_colors[' + i + ']');
+        if (!l) return;
+        var rgb = hexRgb(c);
+        gl.uniform4f(l, rgb[0], rgb[1], rgb[2], 1);
+      });
+    }
+
+    // 冰山同款参数：深海色板 + 种子随机 + 7 档湍流
+    setColors(['#000000', '#013a63', '#0582ca', '#00a8e8', '#ff791a']);
+    uf1('u_seed', Math.floor(Math.random() * 1001));
+    uf1('u_speed', 0.2); uf1('u_loop', 0); uf1('u_scale', 0.55);
+    uf1('u_turbAmp', 0.4); uf1('u_turbFreq', 0.1); uf1('u_turbIter', 7);
+    uf1('u_waveFreq', 3.8); uf1('u_distBias', 0); uf1('u_jellify', 0);
+    uf1('u_ditherMode', 0); uf1('u_dither', 0.05); uf1('u_exposure', 1.1);
+    uf1('u_contrast', 1); uf1('u_saturation', 0.9); uf1('u_darkShift', 0);
+
+    var locRes = gl.getUniformLocation(prog, 'u_resolution');
+    var locTime = gl.getUniformLocation(prog, 'u_time');
+    var locPR = gl.getUniformLocation(prog, 'u_pixelRatio');
+    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var start = performance.now();
+    var last = -Infinity;
+    var FPS = 30;
+
+    function resize() {
+      var pr = Math.min(window.devicePixelRatio || 1, 2) * 0.5;
+      var w = Math.max(1, Math.floor(canvas.clientWidth * pr));
+      var h = Math.max(1, Math.floor(canvas.clientHeight * pr));
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      gl.viewport(0, 0, w, h);
+      if (locRes) gl.uniform2f(locRes, w, h);
+      if (locPR) gl.uniform1f(locPR, canvas.clientWidth > 0 ? w / canvas.clientWidth : 1);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function frame(now) {
+      requestAnimationFrame(frame);
+      if (now - last < 1000 / FPS) return;
+      last = now;
+      if (locTime) gl.uniform1f(locTime, reduced ? 0 : (now - start) / 1000);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    requestAnimationFrame(frame);
+    document.addEventListener('visibilitychange', function () { last = -Infinity; });
+  } catch (e) {
+    if (window.console) console.warn('[liquid-bg]', e);
+  }
+})();
+</script>
+</body>
+</html>
